@@ -1,0 +1,400 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>HSD CSV Viewer — Multi-file Merge (Annotated)</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    thead th { position: sticky; top: 0; background: white; box-shadow: 0 1px 0 rgba(0,0,0,0.08); }
+    .scroll-thin { scrollbar-width: thin; }
+    table thead th, table tbody td { padding: 0.5rem; font-size: 0.85rem; }
+    .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; }
+  </style>
+</head>
+<body class="min-h-screen bg-slate-50 text-slate-800">
+  <div class="max-w-7xl mx-auto p-4">
+    <header class="mb-4 flex items-center justify-between gap-3">
+      <h1 class="text-2xl font-semibold">HSD CSV Viewer — Multi-file Merge</h1>
+      <span class="text-sm text-slate-500">Upload files → edit per-file data → select steps → merge/export</span>
+    </header>
+
+    <section class="grid grid-cols-1 lg:grid-cols-4 gap-4">
+      <!-- Left: file + step chooser -->
+      <div class="lg:col-span-2 space-y-4">
+        <!-- Upload -->
+        <div class="bg-white rounded-2xl shadow p-4">
+          <label class="block text-sm font-medium mb-2">Upload one or more HSD CSV files</label>
+          <input id="fileInput" type="file" accept=".csv,.txt" class="block w-full text-sm" multiple />
+          <p class="text-xs text-slate-500 mt-2">Files will appear in the Data Edit section for property annotations.</p>
+        </div>
+
+        <!-- Data Edit -->
+        <div id="filesCard" class="bg-white rounded-2xl shadow p-4 hidden">
+          <div class="flex items-center justify-between mb-3">
+            <h2 class="text-lg font-semibold">Data Edit</h2>
+            <button id="addPropBtn" class="px-2 py-1 rounded bg-slate-100 text-sm">Add Property</button>
+          </div>
+          <div class="max-h-[35vh] overflow-auto scroll-thin">
+            <table class="w-full text-sm">
+              <thead id="fileTableHead"></thead>
+              <tbody id="fileTableBody"></tbody>
+            </table>
+          </div>
+        </div>
+
+        <!-- Steps -->
+        <div id="stepsCard" class="bg-white rounded-2xl shadow p-4 hidden">
+          <div class="flex items-center justify-between mb-3">
+            <h2 class="text-lg font-semibold">Steps</h2>
+            <input id="searchBox" type="text" placeholder="Search file, type, # or description…" class="text-sm px-2 py-1 rounded bg-slate-100 focus:bg-white border border-slate-200" />
+          </div>
+          <div class="max-h-[50vh] overflow-auto scroll-thin">
+            <table class="w-full text-sm">
+              <thead>
+                <tr class="text-left text-slate-500">
+                  <th>File</th>
+                  <th>Lubricant</th>
+                  <th>#</th>
+                  <th>Type</th>
+                  <th>Rows</th>
+                  <th>Started</th>
+                  <th>Select</th>
+                </tr>
+              </thead>
+              <tbody id="stepTableBody"></tbody>
+            </table>
+          </div>
+          <div class="flex items-center gap-2 mt-3">
+            <button id="mergeBtn" class="px-3 py-1.5 rounded bg-slate-900 text-white text-sm disabled:opacity-40" disabled>Merge Selected</button>
+            <button id="clearSelBtn" class="px-3 py-1.5 rounded bg-slate-100 text-sm">Clear</button>
+          </div>
+          <p id="mergeHint" class="text-xs text-slate-500 mt-2">Select ≥2 steps with identical base headers and same type.</p>
+        </div>
+      </div>
+
+      <!-- Right: merged table only -->
+      <div class="lg:col-span-2 space-y-4">
+        <div id="mergedCard" class="bg-white rounded-2xl shadow p-4 hidden">
+          <div class="flex justify-between items-center mb-3">
+            <h2 class="text-lg font-semibold" id="detailTitle">Merged Table</h2>
+            <button id="btnDownloadMerged" class="px-3 py-1.5 rounded bg-slate-900 text-white text-sm">Download CSV</button>
+          </div>
+          <div class="border rounded-xl overflow-hidden">
+            <div class="max-h-[75vh] overflow-auto scroll-thin">
+              <table class="w-full text-sm" id="dataTable">
+                <thead id="dataThead"></thead>
+                <tbody id="dataTbody"></tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+
+        <div id="emptyState" class="bg-white rounded-2xl shadow p-10 text-center text-slate-500">
+          <p>Upload one or more HSD CSV files to begin.</p>
+        </div>
+      </div>
+    </section>
+  </div>
+
+  <script>
+    // ---------- State ----------
+    // files: [{id, name, lines, steps:[...], props:{...}}]
+    const state = { files: [], selectedFileIds: [], selectedStepKeys: [], propCols: ['Lubricant'] };
+    const qs = (sel, el=document) => el.querySelector(sel);
+    const qsa = (sel, el=document) => Array.from(el.querySelectorAll(sel));
+
+    // ---------- Parsing per file ----------
+    function parseCsvTextToSteps(text){
+      const lines = text.split(/\r?\n/);
+      const outSteps = [];
+      let i = 0;
+      // Skip metadata until first Step
+      while(i < lines.length){
+        const line = lines[i];
+        if(line && line.startsWith('Step,,,')) break;
+        i++;
+      }
+      // Steps
+      while(i < lines.length){
+        if(!lines[i]?.startsWith('Step,,,')){ i++; continue; }
+        const m = lines[i].match(/^Step,,,*\s*(\d+)/);
+        const number = m ? parseInt(m[1],10) : -1;
+        i++;
+        let started_at=null, step_type=null, description=null, electrical_mode=null;
+        let header=null;
+        while(i < lines.length){
+          const line = lines[i]||'';
+          if(line.startsWith('Step,,,')) break;
+          if(line.startsWith('Started at,,,')){ started_at=line.split(',,,')[1]?.trim()||''; i++; continue; }
+          if(line.startsWith('Step type,,,')){ step_type=line.split(',,,')[1]?.trim()||''; i++; continue; }
+          if(line.startsWith('Description,,,')){ description=line.split(',,,')[1]?.trim()||''; i++; continue; }
+          if(line.startsWith('Electrical Mode')){ electrical_mode=line.split(/\t|,/)[1]?.trim()||''; i++; continue; }
+          if(line.split(',').length-1 >= 5){ header=line.split(',').map(s=>s.trim()); i++; break; }
+          i++;
+        }
+        if(!header) continue;
+        const data_start=i;
+        let data_end=i-1;
+        const dataLines=[];
+        while(i<lines.length){
+          const ln=lines[i];
+          if(ln?.startsWith('Step,,,')) break;
+          if(ln?.trim()==='' && (lines[i+1]||'').startsWith('Step,,,')) break;
+          dataLines.push(ln);
+          i++;
+        }
+        data_end=i-1;
+        while(dataLines.length && dataLines[dataLines.length-1]?.trim()===''){ dataLines.pop(); data_end--; }
+        const n_rows = dataLines.filter(r=>r && r.trim()!=='').length;
+        if(n_rows===0) continue;
+        outSteps.push({ number, step_type, started_at, header, n_rows, data_start_line:data_start, data_end_line:data_end });
+      }
+      return {lines, steps: outSteps};
+    }
+
+    // ---------- Helpers ----------
+    function normaliseRow(row, headerLen){
+      const fields=row.split(',').map(s=>s.trim());
+      if(fields.length<headerLen){ while(fields.length<headerLen)fields.push(''); return fields; }
+      if(fields.length===headerLen) return fields;
+      const head=fields.slice(0,headerLen-1);
+      const tail=fields.slice(headerLen-1).join(',');
+      return head.concat([tail]);
+    }
+
+    function filenameStem(name){
+      const idx = name.lastIndexOf('.');
+      return idx>0 ? name.slice(0, idx) : name;
+    }
+
+    // ---------- UI Builders ----------
+    function buildFileTable(){
+      const card = qs('#filesCard');
+      if(!state.files.length){ card.classList.add('hidden'); return; }
+      card.classList.remove('hidden');
+      const thead = qs('#fileTableHead');
+      const tbody = qs('#fileTableBody');
+      thead.innerHTML='';
+      tbody.innerHTML='';
+      const headRow=document.createElement('tr');
+      ['Select','File','Steps','Started'].concat(state.propCols).forEach(h=>{
+        const th=document.createElement('th');
+        th.textContent=h;
+        headRow.appendChild(th);
+      });
+      thead.appendChild(headRow);
+      state.files.forEach(f => {
+        const started = f.steps[0]?.started_at || '';
+        const checked = state.selectedFileIds.includes(f.id) ? 'checked' : '';
+        const tr = document.createElement('tr');
+        let html =
+          '<td><input type="checkbox" data-id="' + f.id + '" ' + checked + '></td>' +
+          '<td class="mono">' + f.name + '</td>' +
+          '<td>' + f.steps.length + '</td>' +
+          '<td>' + started + '</td>';
+        state.propCols.forEach(p=>{
+          const val = f.props[p] || '';
+          html += '<td><input type="text" data-id="' + f.id + '" data-prop="' + p + '" class="propInput px-1 py-0.5 border rounded w-28" value="' + val + '"></td>';
+        });
+        tr.innerHTML = html;
+        tbody.appendChild(tr);
+      });
+      // Bind events
+      qsa('#fileTableBody input[type="checkbox"]').forEach(chk=>{
+        chk.addEventListener('change', e=>{
+          const id = e.target.getAttribute('data-id');
+          if(e.target.checked){ if(!state.selectedFileIds.includes(id)) state.selectedFileIds.push(id); }
+          else { state.selectedFileIds = state.selectedFileIds.filter(x=>x!==id); }
+          state.selectedStepKeys = state.selectedStepKeys.filter(k => state.selectedFileIds.includes(k.split(':')[0]));
+          buildStepTable(qs('#searchBox').value||'');
+        });
+      });
+      qsa('#fileTableBody .propInput').forEach(inp=>{
+        inp.addEventListener('input', e=>{
+          const id = e.target.getAttribute('data-id');
+          const prop = e.target.getAttribute('data-prop');
+          const file = state.files.find(f=>f.id===id);
+          file.props[prop] = e.target.value.trim();
+          if(prop==='Lubricant') buildStepTable(qs('#searchBox').value||'');
+        });
+      });
+    }
+
+    function buildStepTable(filter=''){
+      const card = qs('#stepsCard');
+      const tbody=qs('#stepTableBody');
+      tbody.innerHTML='';
+      const f = (filter||'').toLowerCase();
+      const steps=[];
+      state.files.forEach(file=>{
+        if(!state.selectedFileIds.includes(file.id)) return;
+        file.steps.forEach(s=>{
+          steps.push({
+            fileId:file.id,
+            fileName:file.name,
+            lubricant:file.props.Lubricant || '',
+            number:s.number,
+            step_type:s.step_type,
+            started_at:s.started_at,
+            n_rows:s.n_rows,
+            header:s.header
+          });
+        });
+      });
+      if(!steps.length){ card.classList.add('hidden'); updateMergeState(); return; }
+      card.classList.remove('hidden');
+      steps
+        .slice().sort((a,b)=> a.fileName.localeCompare(b.fileName) || a.number-b.number)
+        .filter(s => !f || (s.fileName+' '+(s.step_type||'')+' '+String(s.number)+' '+(s.started_at||'')+' '+(s.lubricant||'')).toLowerCase().includes(f))
+        .forEach(s=>{
+          const tr=document.createElement('tr');
+          const key = `${s.fileId}:${s.number}`;
+          const checked = state.selectedStepKeys.includes(key) ? 'checked' : '';
+          tr.innerHTML =
+            '<td class="mono">' + s.fileName + '</td>' +
+            '<td class="mono">' + (s.lubricant || '') + '</td>' +
+            '<td>' + s.number + '</td>' +
+            '<td>' + (s.step_type || '') + '</td>' +
+            '<td>' + s.n_rows + '</td>' +
+            '<td>' + (s.started_at || '') + '</td>' +
+            '<td><input type="checkbox" data-key="' + key + '" ' + checked + '></td>';
+          tbody.appendChild(tr);
+        });
+      qsa("#stepTableBody input[type='checkbox']").forEach(chk=>{
+        chk.addEventListener('change', (e)=>{
+          const key = e.target.getAttribute('data-key');
+          if(e.target.checked){ if(!state.selectedStepKeys.includes(key)) state.selectedStepKeys.push(key); }
+          else { state.selectedStepKeys = state.selectedStepKeys.filter(x=>x!==key); }
+          updateMergeState();
+        });
+      });
+      updateMergeState();
+    }
+
+    function updateMergeState(){
+      const btn=qs('#mergeBtn'); const hint=qs('#mergeHint');
+      const sel = state.selectedStepKeys.slice();
+      if(sel.length<2){ btn.disabled=true; if(hint) hint.textContent='Select ≥2 steps with identical base headers and same type.'; return; }
+      // Quick type check
+      const selSteps = sel.map(k=>{
+        const [fid, snum] = k.split(':'); const f = state.files.find(x=>x.id===fid);
+        return { file: f, step: f.steps.find(s=>String(s.number)===String(snum)) };
+      });
+      const typeSet = new Set(selSteps.map(x=>x.step.step_type||''));
+      btn.disabled = typeSet.size>1;
+      hint.textContent = btn.disabled ? 'Selected steps have different types.' : 'Ready to merge ' + sel.length + ' step(s).';
+    }
+
+    function renderMergedTable(title, header, rows){
+      qs('#detailTitle').textContent = title;
+      const thead=qs('#dataThead');
+      const tbody=qs('#dataTbody');
+      thead.innerHTML=''; tbody.innerHTML='';
+      const trh=document.createElement('tr');
+      header.forEach(h=>{ const th=document.createElement('th'); th.textContent=h; trh.appendChild(th); });
+      thead.appendChild(trh);
+      // batch paint for responsiveness
+      let idx=0; const batch=250;
+      function paint(){
+        const end=Math.min(idx+batch, rows.length);
+        const frag=document.createDocumentFragment();
+        for(let i=idx;i<end;i++){ const tr=document.createElement('tr'); rows[i].forEach(cell=>{const td=document.createElement('td');td.textContent=cell;tr.appendChild(td);}); frag.appendChild(tr); }
+        tbody.appendChild(frag); idx=end; if(idx<rows.length) requestAnimationFrame(paint);
+      }
+      requestAnimationFrame(paint);
+      qs('#mergedCard').classList.remove('hidden');
+      qs('#emptyState').classList.add('hidden');
+      // Bind download
+      qs('#btnDownloadMerged').onclick = ()=>{
+        const esc=(v)=>{ if(v==null) return ''; const s=String(v); return (s.includes(',')||s.includes('"')||s.includes('\n')) ? '"'+s.replaceAll('"','""')+'"' : s; };
+        const content=[header.map(esc).join(',')].concat(rows.map(r=>r.map(esc).join(','))).join('\n');
+        const blob=new Blob([content],{type:'text/csv;charset=utf-8;'});
+        const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download='merged_steps.csv'; document.body.appendChild(a); a.click(); a.remove();
+      };
+    }
+
+    // ---------- Merging logic across files ----------
+    function mergeSelected(){
+      const sel = state.selectedStepKeys.slice();
+      if(sel.length<2){ alert('Select at least two steps.'); return; }
+
+      // Collect selected steps with file context
+      const selected = sel.map(k=>{
+        const [fid, snum] = k.split(':');
+        const file = state.files.find(x=>x.id===fid);
+        const step = file.steps.find(s=>String(s.number)===String(snum));
+        return { file, step };
+      });
+
+      // Validate same type
+      const typeSet = new Set(selected.map(x => x.step.step_type || ''));
+      if(typeSet.size>1){ alert('Selected steps have different types.'); return; }
+
+      // Validate identical base headers
+      const baseHdrJSON = JSON.stringify(selected[0].step.header);
+      for(const x of selected){
+        if(JSON.stringify(x.step.header) !== baseHdrJSON){
+          alert('Selected steps have different base column headers.');
+          return;
+        }
+      }
+      const baseHeader = selected[0].step.header.slice();
+
+      // Property columns (stable order from Data Edit)
+      const propCols = state.propCols.slice();
+
+      // Final merged header = base + propCols
+      const mergedHeader = baseHeader.concat(propCols);
+
+      // Build rows
+      const rows = [];
+      selected.forEach(({file, step}) => {
+        const lines = file.lines.slice(step.data_start_line, step.data_end_line+1);
+        lines.filter(r=>r && r.trim()!=='').forEach(r => {
+          const fields = normaliseRow(r, baseHeader.length);
+          const appended = propCols.map(c => (file.props && (c in file.props)) ? file.props[c] : '');
+          rows.push(fields.concat(appended));
+        });
+      });
+
+      renderMergedTable('Merged Steps (' + sel.join(', ') + ')', mergedHeader, rows);
+    }
+
+    // ---------- Wire up ----------
+    qs('#fileInput').addEventListener('change', async e=>{
+      const files = Array.from(e.target.files || []);
+      if(!files.length) return;
+      state.files = []; state.selectedFileIds = []; state.selectedStepKeys = []; state.propCols = ['Lubricant'];
+      for(let idx=0; idx<files.length; idx++){
+        const f = files[idx];
+        const text = await f.text();
+        const parsed = parseCsvTextToSteps(text);
+        const id = Date.now() + '_' + idx + '_' + Math.random().toString(36).slice(2,8);
+        state.files.push({
+          id,
+          name: f.name,
+          lines: parsed.lines,
+          steps: parsed.steps,
+          props: { Lubricant: filenameStem(f.name) }
+        });
+      }
+      buildFileTable();
+      buildStepTable(qs('#searchBox').value||'');
+      qs('#emptyState').classList.toggle('hidden', state.files.length>0);
+    });
+
+    qs('#searchBox').addEventListener('input', e=>{ buildStepTable(e.target.value||''); });
+    qs('#mergeBtn').addEventListener('click', mergeSelected);
+    qs('#clearSelBtn').addEventListener('click', ()=>{ state.selectedStepKeys=[]; buildStepTable(qs('#searchBox').value||''); });
+    qs('#addPropBtn').addEventListener('click', ()=>{
+      const col = (prompt('Property name:', '') || '').trim();
+      if(!col) return;
+      if(state.propCols.includes(col)){ alert('Property already exists.'); return; }
+      state.propCols.push(col);
+      state.files.forEach(f=>{ f.props[col]=''; });
+      buildFileTable();
+    });
+  </script>
+</body>
+</html>
