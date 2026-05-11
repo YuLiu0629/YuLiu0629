@@ -1,7 +1,7 @@
 <h1 align="center">Hi 👋, I'm Yu Liu</h1>
 <h3 align="centre">A PhD, a Test Engineer, a Customer Support, a Developer who wants to automate everything.</h3>
 
-- 📫 How to reach me **yuliu0629@outlook.comk**
+- 📫 How to reach me **yuliu0629@outlook.com**
 
 <h3 align="left">Connect with me:</h3>
 <p align="left">
