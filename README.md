@@ -1,7 +1,5 @@
 <h1 align="center">Hi 👋, I'm Yu Liu</h1>
-<h3 align="center">A final year PhD student in Formulation Engineering CDT at the University of Birmingham.</h3>
-
-- 🌱 I’m currently learning **Python and Julia for data analysis and Machine Learning**
+<h3 align="centre">A PhD, a Test Engineer, a Customer Support, a Developer who wants to automate everything.</h3>
 
 - 📫 How to reach me **yxl044@student.bham.ac.uk**
 
