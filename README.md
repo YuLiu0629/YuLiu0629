@@ -1,5 +1,5 @@
 <h1 align="center">Hi 👋, I'm Yu Liu</h1>
-<h3 align="centre">A PhD, a Test Engineer, a Customer Support, a Developer who wants to automate everything.</h3>
+<h3 align="centre">A PhD, a Test Engineer, a Developer who wants to automate everything.</h3>
 
 - 📫 How to reach me **yuliu0629@outlook.com**
 
