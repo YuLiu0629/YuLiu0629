@@ -1,0 +1,441 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>HSD CSV Viewer — Multi-file Merge (Annotated)</title>
+<style>
+:root{--pcs-navy:#0E2B5C;--pcs-blue:#1F66B0;--pcs-slate-900:#0F172A;--pcs-slate-700:#334155;--pcs-slate-400:#94A3B8;--pcs-line:#E5E7EB;--pcs-bg:#F8FAFC;--radius:12px;--shadow:0 8px 24px rgba(2,6,23,.06);}
+body{font-family:system-ui,-apple-system,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;background:var(--pcs-bg);color:var(--pcs-slate-700);margin:0;}
+.header{display:flex;align-items:center;justify-content:space-between;padding:12px 20px;background:#fff;box-shadow:var(--shadow);border-bottom:1px solid var(--pcs-line);}
+.header .logo{height:32px;}
+.container{max-width:1200px;margin:0 auto;padding:20px;}
+.layout{display:grid;grid-template-columns:1fr;gap:16px;}
+@media(min-width:1024px){.layout{grid-template-columns:repeat(4,1fr);}}
+.span-2{grid-column:span 2;}
+.card{background:#fff;border:1px solid var(--pcs-line);border-radius:var(--radius);box-shadow:var(--shadow);padding:16px;margin-bottom:16px;}
+.section-title{color:var(--pcs-navy);font-weight:600;margin:0 0 .5rem;}
+.btn{display:inline-flex;align-items:center;gap:.5rem;border-radius:10px;padding:.6rem .9rem;font-weight:600;border:1px solid transparent;cursor:pointer;}
+.btn-primary{background:var(--pcs-navy);color:#fff;}
+.btn-primary:hover{filter:brightness(1.05);}
+.btn-ghost{background:#fff;border-color:var(--pcs-line);color:var(--pcs-navy);}
+.btn-ghost:hover{background:#f9fafb;}
+.btn:disabled{opacity:.5;cursor:not-allowed;}
+a{color:var(--pcs-blue);text-decoration:none;}
+a:hover{text-decoration:underline;}
+input,select,textarea{border:1px solid var(--pcs-line);border-radius:10px;padding:.45rem .6rem;background:#fff;color:var(--pcs-slate-700);}
+label{color:var(--pcs-slate-700);font-weight:500;display:block;margin-bottom:.5rem;}
+.table{width:100%;border-collapse:separate;border-spacing:0;background:#fff;border:1px solid var(--pcs-line);border-radius:var(--radius);overflow:hidden;}
+.table thead th{position:sticky;top:0;background:#fff;color:var(--pcs-slate-400);text-align:left;font-weight:600;font-size:.85rem;border-bottom:1px solid var(--pcs-line);padding:.6rem .75rem;}
+.table tbody td{border-top:1px solid var(--pcs-line);padding:.5rem .75rem;font-size:.92rem;}
+.table tbody tr:hover{background:#FAFBFF;}
+.helper{font-size:.85rem;color:var(--pcs-slate-400);}
+.badge{display:inline-block;background:#EEF2FF;color:var(--pcs-navy);border-radius:999px;padding:.15rem .5rem;font-size:.8rem;}
+.hidden{display:none;}
+.mono{font-family:"SFMono-Regular",Menlo,Consolas,"Liberation Mono",monospace;}
+.scroll-thin{scrollbar-width:thin;}
+.row{display:flex;align-items:center;justify-content:space-between;}
+.btn-row{display:flex;align-items:center;gap:8px;margin-top:12px;}
+/* keep filter selects inside the card on narrow widths / long text */
+.filters{display:flex;flex-wrap:wrap;gap:8px;justify-content:flex-start;margin-bottom:8px;}
+.filters select{flex:1 1 220px;max-width:320px}
+
+</style>
+</head>
+<body>
+<header class="header"><img src="https://pcs-instruments.com/wp-content/themes/pcs-2020/dist/images/pcs-instruments-logo.svg" alt="PCS Instruments logo" class="logo"></header>
+<div class="container">
+<section class="layout">
+  <div class="span-2">
+    <div class="card">
+      <h2 class="section-title">Upload</h2>
+      <label>Upload one or more HSD CSV files</label>
+      <input id="fileInput" type="file" accept=".csv,.txt" multiple />
+      <p class="helper">Files will appear in the Data Edit section for property annotations.</p>
+    </div>
+
+    <div id="filesCard" class="card hidden">
+      <div class="row">
+        <h2 class="section-title">Data Edit</h2>
+        <button id="addPropBtn" class="btn btn-ghost">Add Property</button>
+      </div>
+      <div class="scroll-thin" style="max-height:35vh;overflow:auto;">
+        <table class="table">
+          <thead id="fileTableHead"></thead>
+          <tbody id="fileTableBody"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <div id="stepsCard" class="card hidden">
+      <div class="row">
+        <h2 class="section-title">Steps</h2>
+        <input id="searchBox" type="text" placeholder="Search file, type, # or description…" />
+      </div>
+      <div class="filters">
+        <select id="filterFile"><option value="">All files</option></select>
+        <select id="filterLubricant"><option value="">All lubricants</option></select>
+        <select id="filterType"><option value="">All types</option></select>
+      </div>
+      <div class="scroll-thin" style="max-height:50vh;overflow:auto;">
+        <table class="table">
+          <thead>
+            <tr>
+              <th>File</th>
+              <th>Lubricant</th>
+              <th>#</th>
+              <th>Type</th>
+              <th>Rows</th>
+              <th>Started</th>
+              <th>Select</th>
+            </tr>
+          </thead>
+          <tbody id="stepTableBody"></tbody>
+        </table>
+      </div>
+      <div class="btn-row">
+        <button id="mergeBtn" class="btn btn-primary" disabled>Merge Selected</button>
+        <button id="clearSelBtn" class="btn btn-ghost">Clear</button>
+      </div>
+      <p id="mergeHint" class="helper">Select ≥1 step with identical base headers and same type.</p>
+    </div>
+  </div>
+
+  <div class="span-2">
+    <div id="mergedCard" class="card hidden">
+      <div class="row" style="margin-bottom:12px;">
+        <h2 class="section-title" id="detailTitle">Merged Data Table</h2>
+        <button id="btnDownloadMerged" class="btn btn-primary">Download CSV</button>
+      </div>
+      <div class="scroll-thin" style="max-height:75vh;overflow:auto;">
+        <table class="table" id="dataTable">
+          <thead id="dataThead"></thead>
+          <tbody id="dataTbody"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <div id="emptyState" class="card" style="text-align:center;">
+      <p class="helper">Upload one or more HSD CSV files to begin.</p>
+    </div>
+  </div>
+</section>
+</div>
+
+<script>
+  // ---------- State ----------
+  // files: [{id, name, lines, steps:[...], props:{...}}]
+  const state = { files: [], steps: [], selectedFileIds: [], selectedStepKeys: [], propCols: ['Lubricant'] };
+  const qs = (sel, el=document) => el.querySelector(sel);
+  const qsa = (sel, el=document) => Array.from(el.querySelectorAll(sel));
+
+  // ---------- Parsing per file ----------
+  function parseCsvTextToSteps(text){
+    const lines = text.split(/\r?\n/);
+    const outSteps = [];
+    let i = 0;
+    // Skip metadata until first Step
+    while(i < lines.length){
+      const line = lines[i];
+      if(line && line.startsWith('Step,,,')) break;
+      i++;
+    }
+    // Steps
+    while(i < lines.length){
+      if(!lines[i]?.startsWith('Step,,,')){ i++; continue; }
+      const m = lines[i].match(/^Step,,,*\s*(\d+)/);
+      const number = m ? parseInt(m[1],10) : -1;
+      i++;
+      let started_at=null, step_type=null, description=null, electrical_mode=null;
+      let header=null;
+      while(i < lines.length){
+        const line = lines[i]||'';
+        if(line.startsWith('Started at,,,')){ started_at=line.split(',,,')[1]?.trim()||''; i++; continue; }
+        if(line.startsWith('Step type,,,')){ step_type=line.split(',,,')[1]?.trim()||''; i++; continue; }
+        if(line.startsWith('Description,,,')){ description=line.split(',,,')[1]?.trim()||''; i++; continue; }
+        if(line.startsWith('Electrical Mode')){ electrical_mode=line.split(/\t|,/)[1]?.trim()||''; i++; continue; }
+        if(line.split(',').length-1 >= 5){ header=line.split(',').map(s=>s.trim()); i++; break; }
+        i++;
+      }
+      if(!header) break;
+      const data_start=i;
+      let data_end=i-1;
+      const dataLines=[];
+      while(i<lines.length){
+        const ln=lines[i];
+        if(ln?.startsWith('Step,,,')) break;
+        if(ln?.trim()==='' && (lines[i+1]||'').startsWith('Step,,,')) break;
+        dataLines.push(ln);
+        i++;
+      }
+      data_end=i-1;
+      while(dataLines.length && dataLines[dataLines.length-1]?.trim()===''){ dataLines.pop(); data_end--; }
+      const n_rows = dataLines.filter(r=>r && r.trim()!=='').length;
+      outSteps.push({ number, step_type, started_at, header, n_rows, data_start_line:data_start, data_end_line:data_end });
+    }
+    return {lines, steps: outSteps};
+  }
+
+  // ---------- Helpers ----------
+  function normaliseRow(row, headerLen){
+    const fields=row.split(',').map(s=>s.trim());
+    if(fields.length<headerLen){ while(fields.length<headerLen)fields.push(''); return fields; }
+    if(fields.length===headerLen) return fields;
+    const head=fields.slice(0,headerLen-1);
+    const tail=fields.slice(headerLen-1).join(',');
+    return head.concat([tail]);
+  }
+
+  function filenameStem(name){
+    const idx = name.lastIndexOf('.');
+    return idx>0 ? name.slice(0, idx) : name;
+  }
+
+  // ---------- UI Builders ----------
+  function buildFileTable(){
+    const head=qs('#fileTableHead'); const body=qs('#fileTableBody');
+    head.innerHTML=''; body.innerHTML='';
+    const trh=document.createElement('tr');
+    trh.innerHTML='<th>File</th><th>Steps</th><th>Started</th>';
+    state.propCols.forEach(c=>{ const th=document.createElement('th'); th.textContent=c; trh.appendChild(th); });
+    const thSel=document.createElement('th'); thSel.textContent='Select'; trh.appendChild(thSel);
+    head.appendChild(trh);
+
+    state.files.forEach(f=>{
+      const tr=document.createElement('tr');
+      const tdFile=document.createElement('td'); tdFile.textContent=f.name; tdFile.className='mono'; tr.appendChild(tdFile);
+      const tdSteps=document.createElement('td'); tdSteps.textContent=f.steps.length; tr.appendChild(tdSteps);
+      const tdStart=document.createElement('td'); tdStart.textContent=f.steps[0]?.started_at||''; tr.appendChild(tdStart);
+      state.propCols.forEach(c=>{
+        const td=document.createElement('td');
+        const inp=document.createElement('input'); inp.value=f.props[c]||'';
+        if(c==='Lubricant'){
+          inp.addEventListener('input',e=>{
+            f.props[c]=e.target.value;
+            state.steps.filter(s=>s.fileId===f.id).forEach(s=>{s.lubricant=f.props[c];});
+            buildStepTable(qs('#searchBox').value||'');
+          });
+        } else {
+          inp.addEventListener('input',e=>{f.props[c]=e.target.value;});
+        }
+        td.appendChild(inp); tr.appendChild(td);
+      });
+      const tdSel=document.createElement('td');
+      const chk=document.createElement('input'); chk.type='checkbox';
+      chk.checked=state.selectedFileIds.includes(f.id);
+      chk.addEventListener('change',e=>{
+        if(e.target.checked){ if(!state.selectedFileIds.includes(f.id)) state.selectedFileIds.push(f.id); }
+        else { state.selectedFileIds=state.selectedFileIds.filter(id=>id!==f.id); }
+        buildStepTable(qs('#searchBox').value||'');
+      });
+      tdSel.appendChild(chk); tr.appendChild(tdSel);
+      body.appendChild(tr);
+    });
+
+    qs('#filesCard').classList.toggle('hidden', state.files.length===0);
+  }
+
+  function updateStepFilters(){
+    const fileSel=qs('#filterFile'); const lubSel=qs('#filterLubricant'); const typeSel=qs('#filterType');
+    if(!fileSel||!lubSel||!typeSel) return;
+    const files=new Set(), lubes=new Set(), types=new Set();
+    state.steps.filter(s=>state.selectedFileIds.includes(s.fileId)).forEach(s=>{
+      if(s.fileName) files.add(s.fileName);
+      if(s.lubricant) lubes.add(s.lubricant);
+      if(s.step_type) types.add(s.step_type);
+    });
+    const prevFile=fileSel.value, prevLub=lubSel.value, prevType=typeSel.value;
+    const setOpts=(sel, allLabel, values, prev)=>{
+      sel.innerHTML='';
+      const opt=document.createElement('option'); opt.value=''; opt.textContent=allLabel; sel.appendChild(opt);
+      Array.from(values).sort().forEach(v=>{ const o=document.createElement('option'); o.value=v; o.textContent=v; sel.appendChild(o); });
+      sel.value = values.has(prev) ? prev : '';
+    };
+    setOpts(fileSel,'All files',files,prevFile);
+    setOpts(lubSel,'All lubricants',lubes,prevLub);
+    setOpts(typeSel,'All types',types,prevType);
+  }
+
+  function buildStepTable(filter=''){
+    updateStepFilters();
+    const tbody=qs('#stepTableBody');
+    tbody.innerHTML='';
+    const f = (filter||'').toLowerCase();
+    const fileF=qs('#filterFile').value; const lubF=qs('#filterLubricant').value; const typeF=qs('#filterType').value;
+    state.steps
+      .slice().sort((a,b)=> a.fileName.localeCompare(b.fileName) || a.number-b.number)
+      .filter(s => state.selectedFileIds.includes(s.fileId))
+      .filter(s => !fileF || s.fileName===fileF)
+      .filter(s => !lubF || s.lubricant===lubF)
+      .filter(s => !typeF || s.step_type===typeF)
+      .filter(s => !f || (s.fileName+' '+(s.step_type||'')+' '+String(s.number)+' '+(s.started_at||'')+' '+(s.lubricant||'')).toLowerCase().includes(f))
+      .forEach(s=>{
+        const tr=document.createElement('tr');
+        const key = `${s.fileId}:${s.number}`;
+        const checked = state.selectedStepKeys.includes(key) ? 'checked' : '';
+        tr.innerHTML =
+          '<td class="mono">' + s.fileName + '</td>' +
+          '<td class="mono">' + (s.lubricant || '') + '</td>' +
+          '<td>' + s.number + '</td>' +
+          '<td>' + (s.step_type || '') + '</td>' +
+          '<td>' + s.n_rows + '</td>' +
+          '<td>' + (s.started_at || '') + '</td>' +
+          '<td><input type="checkbox" data-key="' + key + '" ' + checked + '></td>';
+        tbody.appendChild(tr);
+      });
+    qs('#stepsCard').classList.toggle('hidden', tbody.children.length===0);
+    qsa("#stepTableBody input[type='checkbox']").forEach(chk=>{
+      chk.addEventListener('change', (e)=>{
+        const key = e.target.getAttribute('data-key');
+        if(e.target.checked){ if(!state.selectedStepKeys.includes(key)) state.selectedStepKeys.push(key); }
+        else { state.selectedStepKeys = state.selectedStepKeys.filter(x=>x!==key); }
+        updateMergeState();
+      });
+    });
+    updateMergeState();
+  }
+
+  function updateMergeState(){
+    const btn=qs('#mergeBtn'); const hint=qs('#mergeHint');
+    const sel = state.selectedStepKeys.slice();
+    if(sel.length<1){ btn.disabled=true; if(hint) hint.textContent='Select ≥1 step with identical base headers and same type.'; return; }
+    // Quick type check
+    const selSteps = sel.map(k=>{
+      const [fid, snum] = k.split(':'); const f = state.files.find(x=>x.id===fid);
+      return { file: f, step: f.steps.find(s=>String(s.number)===String(snum)) };
+    });
+    const typeSet = new Set(selSteps.map(x=>x.step.step_type||''));
+    btn.disabled = typeSet.size>1;
+    hint.textContent = btn.disabled ? 'Selected steps have different types.' : 'Ready to merge ' + sel.length + ' step(s).';
+  }
+
+  function renderMergedTable(header, rows){
+    qs('#detailTitle').textContent = 'Merged Data Table';
+    const thead=qs('#dataThead');
+    const tbody=qs('#dataTbody');
+    thead.innerHTML=''; tbody.innerHTML='';
+    const trh=document.createElement('tr');
+    header.forEach(h=>{ const th=document.createElement('th'); th.textContent=h; trh.appendChild(th); });
+    thead.appendChild(trh);
+    // batch paint for responsiveness
+    let idx=0; const batch=250;
+    function paint(){
+      const end=Math.min(idx+batch, rows.length);
+      const frag=document.createDocumentFragment();
+      for(let i=idx;i<end;i++){ const tr=document.createElement('tr'); rows[i].forEach(cell=>{const td=document.createElement('td');td.textContent=cell;tr.appendChild(td);}); frag.appendChild(tr); }
+      tbody.appendChild(frag); idx=end; if(idx<rows.length) requestAnimationFrame(paint);
+    }
+    requestAnimationFrame(paint);
+    qs('#mergedCard').classList.remove('hidden');
+    qs('#emptyState').classList.add('hidden');
+    // Bind download
+    qs('#btnDownloadMerged').onclick = ()=>{
+      const esc=(v)=>{ if(v==null) return ''; const s=String(v); return (s.includes(',')||s.includes('"')||s.includes('\n')) ? '"'+s.replaceAll('"','""')+'"' : s; };
+      const content=[header.map(esc).join(',')].concat(rows.map(r=>r.map(esc).join(','))).join('\n');
+      const blob=new Blob([content],{type:'text/csv;charset=utf-8;'});
+      const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download='merged_steps.csv'; document.body.appendChild(a); a.click(); a.remove();
+    };
+  }
+
+  // ---------- Merging logic across files ----------
+  function mergeSelected(){
+    const sel = state.selectedStepKeys.slice();
+    if(sel.length<1){ alert('Select at least one step.'); return; }
+
+    // Collect selected steps with file context
+    const selected = sel.map(k=>{
+      const [fid, snum] = k.split(':');
+      const file = state.files.find(x=>x.id===fid);
+      const step = file.steps.find(s=>String(s.number)===String(snum));
+      return { file, step };
+    });
+
+    // Validate same type
+    const typeSet = new Set(selected.map(x => x.step.step_type || ''));
+    if(typeSet.size>1){ alert('Selected steps have different types.'); return; }
+
+    // Validate identical base headers
+    const baseHdrJSON = JSON.stringify(selected[0].step.header);
+    for(const x of selected){
+      if(JSON.stringify(x.step.header) !== baseHdrJSON){
+        alert('Selected steps have different base column headers.');
+        return;
+      }
+    }
+    const baseHeader = selected[0].step.header.slice();
+
+    // Property columns (stable order from Data Edit)
+    const propCols = state.propCols.slice();
+
+    // Final merged header = base + propCols
+    const mergedHeader = baseHeader.concat(propCols);
+
+    // Build rows
+    const rows = [];
+    selected.forEach(({file, step}) => {
+      const lines = file.lines.slice(step.data_start_line, step.data_end_line+1);
+      lines.filter(r=>r && r.trim()!=='').forEach(r => {
+        const fields = normaliseRow(r, baseHeader.length);
+        const appended = propCols.map(c => (file.props && (c in file.props)) ? file.props[c] : '');
+        rows.push(fields.concat(appended));
+      });
+    });
+
+    renderMergedTable(mergedHeader, rows);
+  }
+
+  // ---------- Wire up ----------
+  qs('#fileInput').addEventListener('change', async e=>{
+    const files = Array.from(e.target.files || []);
+    if(!files.length) return;
+    state.files = []; state.steps = []; state.selectedFileIds = []; state.selectedStepKeys = []; state.propCols = ['Lubricant'];
+    for(let idx=0; idx<files.length; idx++){
+      const f = files[idx];
+      const text = await f.text();
+      const parsed = parseCsvTextToSteps(text);
+      const id = Date.now() + '_' + idx + '_' + Math.random().toString(36).slice(2,8);
+      state.files.push({
+        id,
+        name: f.name,
+        lines: parsed.lines,
+        steps: parsed.steps,
+        props: { Lubricant: filenameStem(f.name) }
+      });
+    }
+    state.selectedFileIds = state.files.map(f=>f.id);
+    state.files.forEach(file => {
+      file.steps.forEach(s => {
+        state.steps.push({
+          fileId: file.id,
+          fileName: file.name,
+          lubricant: file.props.Lubricant,
+          number: s.number,
+          step_type: s.step_type,
+          started_at: s.started_at,
+          n_rows: s.n_rows,
+          header: s.header,
+        });
+      });
+    });
+    buildFileTable();
+    buildStepTable(qs('#searchBox').value||'');
+    qs('#emptyState').classList.toggle('hidden', state.files.length>0);
+  });
+
+  qs('#searchBox').addEventListener('input', e=>{ buildStepTable(e.target.value||''); });
+  qs('#filterFile').addEventListener('change', ()=>{ buildStepTable(qs('#searchBox').value||''); });
+  qs('#filterLubricant').addEventListener('change', ()=>{ buildStepTable(qs('#searchBox').value||''); });
+  qs('#filterType').addEventListener('change', ()=>{ buildStepTable(qs('#searchBox').value||''); });
+  qs('#mergeBtn').addEventListener('click', mergeSelected);
+  qs('#clearSelBtn').addEventListener('click', ()=>{ state.selectedStepKeys=[]; buildStepTable(qs('#searchBox').value||''); });
+  qs('#addPropBtn').addEventListener('click', ()=>{
+    const col = (prompt('Property name:', '') || '').trim();
+    if(!col) return;
+    if(state.propCols.includes(col)){ alert('Property already exists.'); return; }
+    state.propCols.push(col);
+    state.files.forEach(f=>{ f.props[col]=''; });
+    buildFileTable();
+  });
+</script>
+</body>
+</html>
